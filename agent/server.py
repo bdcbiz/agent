@@ -1314,8 +1314,32 @@ class Server(Base):
         environment = Environment(**options)
         template = environment.get_template(template)
 
-        with open(outfile, "w") as f:
-            f.write(template.render(**context))
+        rendered = template.render(**context)
+        output_directory = os.path.dirname(outfile) or "."
+        output_mode = (
+            os.stat(outfile).st_mode & 0o777
+            if os.path.exists(outfile)
+            else 0o644
+        )
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=output_directory,
+                prefix=f".{os.path.basename(outfile)}.",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = temporary_file.name
+                temporary_file.write(rendered)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            os.chmod(temporary_path, output_mode)
+            os.replace(temporary_path, outfile)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                with suppress(FileNotFoundError):
+                    os.unlink(temporary_path)
 
     def _update_supervisor(self):
         self.execute("sudo supervisorctl reread")

@@ -842,6 +842,7 @@ WHERE `schema` IN (
                 "s3",
                 aws_access_key_id=auth["ACCESS_KEY"],
                 aws_secret_access_key=auth["SECRET_KEY"],
+                endpoint_url=auth.get("ENDPOINT_URL") or None,
                 region_name=region,
             )
         else:
@@ -849,6 +850,7 @@ WHERE `schema` IN (
                 "s3",
                 aws_access_key_id=auth["ACCESS_KEY"],
                 aws_secret_access_key=auth["SECRET_KEY"],
+                endpoint_url=auth.get("ENDPOINT_URL") or None,
             )
 
         tmp_folder = get_tmp_folder_path()

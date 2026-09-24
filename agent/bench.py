@@ -535,6 +535,19 @@ class Bench(Base):
 
     def generate_nginx_config(self):
         sites = [s for s in self.valid_sites.values()]
+        configured_site_directories = [
+            entry.name
+            for entry in os.scandir(self.sites_directory)
+            if entry.is_dir()
+            and os.path.isfile(os.path.join(entry.path, "site_config.json"))
+        ]
+        if configured_site_directories and not sites:
+            raise RuntimeError(
+                "Refusing to replace nginx.conf with no server blocks: "
+                "site discovery returned no valid sites while site_config.json "
+                "exists for "
+                + ", ".join(sorted(configured_site_directories))
+            )
         domains = _get_domains(sites)
 
         if standalone := self.server.config.get("standalone"):

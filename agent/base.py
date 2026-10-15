@@ -89,6 +89,13 @@ class Base:
             self.log()
         return self.data
 
+    def docker_login(self, registry):
+        """Log Docker into a registry without placing its password in argv."""
+        return self.execute(
+            ["docker", "login", "--username", registry["username"], "--password-stdin", registry["url"]],
+            input=registry["password"],
+        )
+
     def run_subprocess(self, command, directory, input, executable, non_zero_throw=True):
         # Start a child process and start reading output immediately
         if isinstance(command, str):
@@ -112,12 +119,12 @@ class Base:
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE if input else None,
+            stdin=subprocess.PIPE if input is not None else None,
             cwd=directory,
             shell=use_shell,
             executable=executable,
         ) as process:
-            if input:
+            if input is not None:
                 process._stdin_write(input.encode())
 
             output = self.parse_output(process)

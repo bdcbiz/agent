@@ -85,12 +85,6 @@ class Server(Base):
     def backup_workers(self) -> int:
         return self.config.get("backup_workers", 1)
 
-    def docker_login(self, registry):
-        return self.execute(
-            ["docker", "login", "--username", registry["username"], "--password-stdin", registry["url"]],
-            input=registry["password"],
-        )
-
     def docker_inspect_manifest(self, image_tag: str):
         try:
             return self.execute(f"docker manifest inspect {shlex.quote(image_tag)}")
@@ -1316,11 +1310,7 @@ class Server(Base):
 
         rendered = template.render(**context)
         output_directory = os.path.dirname(outfile) or "."
-        output_mode = (
-            os.stat(outfile).st_mode & 0o777
-            if os.path.exists(outfile)
-            else 0o644
-        )
+        output_mode = os.stat(outfile).st_mode & 0o777 if os.path.exists(outfile) else 0o644
         temporary_path = None
         try:
             with tempfile.NamedTemporaryFile(

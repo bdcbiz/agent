@@ -32,6 +32,18 @@ class TestRegistryLogin(unittest.TestCase):
             input=password,
         )
 
+    def test_server_login_forwards_stdin_through_real_execute(self):
+        server = Server.__new__(Server)
+        Base.__init__(server)
+        password = "synthetic-server-stdin-canary"
+        server.run_subprocess = Mock(return_value=("Login Succeeded", 0))
+
+        with patch("builtins.print"), patch.object(Server, "update_redis"):
+            server.docker_login({"url": "registry.example.test", "username": "user", "password": password})
+
+        self.assertTrue(server.run_subprocess.call_args.args[2] == password)
+        self.assertTrue(password not in str(server.data))
+
     def test_execute_does_not_log_standard_input(self):
         secret = "registry-password-for-test-only"
         base = Base()

@@ -29,14 +29,6 @@ if TYPE_CHECKING:
     from agent.base import Base
 
 
-if os.environ.get("SENTRY_DSN"):
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"])
-    except ImportError:
-        pass
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 4 * 3600
@@ -86,6 +78,43 @@ def redact_persisted_data(value):
     if isinstance(value, tuple):
         return tuple(redact_persisted_data(item) for item in value)
     return value
+
+
+class RQDiagnosticFilter(logging.Filter):
+    """Keep trusted RQ execution payloads out of diagnostic LogRecords."""
+
+    def filter(self, record):
+        # RQ 1.13 attaches original args as structured extras on worker errors.
+        # Drop all arguments, including positional/unlabelled credentials.
+        for field in ("arguments", "kwargs"):
+            if hasattr(record, field):
+                setattr(record, field, REDACTED_VALUE)
+        return True
+
+
+logging.getLogger("rq.worker").addFilter(RQDiagnosticFilter())
+
+
+def sanitize_sentry_event(event, hint):
+    """RQ's Sentry integration separately copies execution args into events."""
+    rq_job = event.get("extra", {}).get("rq-job")
+    if isinstance(rq_job, dict):
+        for field in ("args", "kwargs", "description"):
+            rq_job.pop(field, None)
+    return event
+
+
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=os.environ["SENTRY_DSN"],
+            include_local_variables=False,
+            before_send=sanitize_sentry_event,
+        )
+    except ImportError:
+        pass
 
 
 @wrapt.decorator
@@ -308,6 +337,7 @@ def job(name: str, priority="default", timeout=None, on_success=None, on_failure
             wrapped,
             args=args,
             kwargs=kwargs,
+            description=name,
             timeout=final_timeout,
             result_ttl=24 * 3600,
             job_id=str(instance.job_record.model.id),

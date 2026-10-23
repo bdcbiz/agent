@@ -742,12 +742,13 @@ class Server(Base):
             shutil.move(destination, archived_site_path)
         shutil.move(site.directory, target.sites_directory)
 
-    def execute(self, command, directory=None, skip_output_log=False, non_zero_throw=True):
+    def execute(self, command, directory=None, skip_output_log=False, non_zero_throw=True, input=None):
         return super().execute(
             command,
             directory=directory,
             skip_output_log=skip_output_log,
             non_zero_throw=non_zero_throw,
+            input=input,
         )
 
     @job("Pull Docker Images", priority="high")

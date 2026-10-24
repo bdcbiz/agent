@@ -29,18 +29,17 @@ if TYPE_CHECKING:
     from agent.base import Base
 
 
-if os.environ.get("SENTRY_DSN"):
-    try:
-        import sentry_sdk
-
-        sentry_sdk.init(dsn=os.environ["SENTRY_DSN"])
-    except ImportError:
-        pass
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 4 * 3600
 MAX_TIMEOUT = 24 * 3600
+
+# These are credential-bearing field names used by Agent and common integrations.
+# Deliberately avoid broad substring matching so ordinary operational metadata stays useful.
+SENSITIVE_DATA_KEYS = frozenset(
+    {"password", "passwd", "secret", "token", "auth", "api_key", "registry_password", "private_key"}
+)
+REDACTED_VALUE = "[REDACTED]"
 
 agent_database = SqliteDatabase(
     "jobs.sqlite3",
@@ -63,6 +62,59 @@ def connection():
 
 def queue(name):
     return Queue(name, connection=connection())
+
+
+def redact_persisted_data(value):
+    """Copy JSON-like job data while replacing values under sensitive keys."""
+    if isinstance(value, dict):
+        return {
+            key: REDACTED_VALUE
+            if isinstance(key, str) and key.lower() in SENSITIVE_DATA_KEYS
+            else redact_persisted_data(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_persisted_data(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_persisted_data(item) for item in value)
+    return value
+
+
+class RQDiagnosticFilter(logging.Filter):
+    """Keep trusted RQ execution payloads out of diagnostic LogRecords."""
+
+    def filter(self, record):
+        # RQ 1.13 attaches original args as structured extras on worker errors.
+        # Drop all arguments, including positional/unlabelled credentials.
+        for field in ("arguments", "kwargs"):
+            if hasattr(record, field):
+                setattr(record, field, REDACTED_VALUE)
+        return True
+
+
+logging.getLogger("rq.worker").addFilter(RQDiagnosticFilter())
+
+
+def sanitize_sentry_event(event, hint):
+    """RQ's Sentry integration separately copies execution args into events."""
+    rq_job = event.get("extra", {}).get("rq-job")
+    if isinstance(rq_job, dict):
+        for field in ("args", "kwargs", "description"):
+            rq_job.pop(field, None)
+    return event
+
+
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+
+        sentry_sdk.init(
+            dsn=os.environ["SENTRY_DSN"],
+            include_local_variables=False,
+            before_send=sanitize_sentry_event,
+        )
+    except ImportError:
+        pass
 
 
 @wrapt.decorator
@@ -129,8 +181,8 @@ class Job(Action):
         self.model.data = json.dumps(
             {
                 "function": function.__func__.__name__,
-                "args": args,
-                "kwargs": kwargs,
+                "args": redact_persisted_data(args),
+                "kwargs": redact_persisted_data(kwargs),
             },
             default=str,
             sort_keys=True,
@@ -147,7 +199,11 @@ class Job(Action):
     def stop(self):
         send_stop_job_command(self.redis, self.job.get_id())
         self.job.refresh()
-        self.model.data = json.dumps(self.job.to_dict(), default=str)
+        rq_job_data = self.job.to_dict()
+        safe_job_data = {
+            key: value for key, value in rq_job_data.items() if key not in {"data", "description"}
+        }
+        self.model.data = json.dumps(redact_persisted_data(safe_job_data), default=str)
         self.model.status = "Failure"
         self.end()
 
@@ -281,6 +337,7 @@ def job(name: str, priority="default", timeout=None, on_success=None, on_failure
             wrapped,
             args=args,
             kwargs=kwargs,
+            description=name,
             timeout=final_timeout,
             result_ttl=24 * 3600,
             job_id=str(instance.job_record.model.id),

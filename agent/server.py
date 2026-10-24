@@ -85,12 +85,6 @@ class Server(Base):
     def backup_workers(self) -> int:
         return self.config.get("backup_workers", 1)
 
-    def docker_login(self, registry):
-        url = shlex.quote(registry["url"])
-        username = shlex.quote(registry["username"])
-        password = shlex.quote(registry["password"])
-        return self.execute(f"docker login -u {username} -p {password} {url}")
-
     def docker_inspect_manifest(self, image_tag: str):
         try:
             return self.execute(f"docker manifest inspect {shlex.quote(image_tag)}")
@@ -748,12 +742,13 @@ class Server(Base):
             shutil.move(destination, archived_site_path)
         shutil.move(site.directory, target.sites_directory)
 
-    def execute(self, command, directory=None, skip_output_log=False, non_zero_throw=True):
+    def execute(self, command, directory=None, skip_output_log=False, non_zero_throw=True, input=None):
         return super().execute(
             command,
             directory=directory,
             skip_output_log=skip_output_log,
             non_zero_throw=non_zero_throw,
+            input=input,
         )
 
     @job("Pull Docker Images", priority="high")
@@ -1316,11 +1311,7 @@ class Server(Base):
 
         rendered = template.render(**context)
         output_directory = os.path.dirname(outfile) or "."
-        output_mode = (
-            os.stat(outfile).st_mode & 0o777
-            if os.path.exists(outfile)
-            else 0o644
-        )
+        output_mode = os.stat(outfile).st_mode & 0o777 if os.path.exists(outfile) else 0o644
         temporary_path = None
         try:
             with tempfile.NamedTemporaryFile(

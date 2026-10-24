@@ -86,10 +86,10 @@ class Server(Base):
         return self.config.get("backup_workers", 1)
 
     def docker_login(self, registry):
-        url = shlex.quote(registry["url"])
-        username = shlex.quote(registry["username"])
-        password = shlex.quote(registry["password"])
-        return self.execute(f"docker login -u {username} -p {password} {url}")
+        return self.execute(
+            ["docker", "login", "--username", registry["username"], "--password-stdin", registry["url"]],
+            input=registry["password"],
+        )
 
     def docker_inspect_manifest(self, image_tag: str):
         try:

@@ -20,6 +20,7 @@ import jinja2
 import semantic_version as sv
 
 from agent.base import Base
+from agent.build_queue import remote_build_queue
 from agent.build_utils.validations import check_python_syntax, get_package_manager_files
 from agent.exceptions import AgentException, RegistryDownException
 from agent.job import Job, Step, job, step
@@ -585,7 +586,7 @@ class ImageBuilder(Base, JobMixin):
 
         return tmp_file_path
 
-    @job("Run Remote Builder")
+    @job("Run Remote Builder", priority=remote_build_queue())
     def run_remote_builder(self):
         self.context_manager.clone_repositories()
         self.context_manager.prepare_build_context()
